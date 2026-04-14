@@ -72,8 +72,10 @@ def _build_initial_state(
         "conversation_id": conversation_id,
         "user_message": user_message,
         "image_url": image_url,
+        # conversation_history intentionally omitted — LangGraph MemorySaver preserves
+        # it from the previous turn so context_hydration_node can skip the Supabase fetch.
+        # Falls back to Supabase on first turn (cold) or after pod restart (MemorySaver cleared).
         "user_profile": {},
-        "conversation_history": [],
         "memory_context": [],
         "graph_relations": [],
         "constraint_rules": [],

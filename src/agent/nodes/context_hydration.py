@@ -11,7 +11,7 @@ from typing import Any
 
 from src.infra import db
 from src.infra.logger import setup_logger
-from src.infra.redis_client import cache_get, cache_set
+from src.infra.redis_client import cache_delete, cache_get, cache_set
 from src.agent.state import GraphState
 
 logger = setup_logger(__name__)
@@ -87,6 +87,41 @@ def derive_constraint_rules(profile: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(rules))  # deduplicate, preserve order
 
 
+# ── Memory local filter (Opt 4) ───────────────────────────────────────────────
+
+# Domains whose memories are always included regardless of what the current
+# message is about. Medical context affects all wellness recommendations;
+# general facts (occupation, lifestyle) are always relevant.
+_ALWAYS_INCLUDE_DOMAINS: frozenset[str] = frozenset({"general", "medical"})
+
+
+def _local_filter_memories(
+    all_memories: list[dict],
+    domains: list[str],
+    limit: int = 10,
+) -> list[str]:
+    """Extract fact strings from a get_all_memories result and domain-filter them.
+
+    Replaces the per-turn Qdrant semantic search when the memory cache is warm.
+    - Always includes "general" and "medical" domain memories.
+    - Includes other domains only when they appear in the inferred domain list.
+    - When no domain restriction is inferred (empty list), all memories pass.
+    """
+    if not all_memories:
+        return []
+
+    facts: list[str] = []
+    for mem in all_memories:
+        text = mem.get("memory") or mem.get("fact") or mem.get("content", "")
+        if not text:
+            continue
+        mem_domain = (mem.get("metadata") or {}).get("domain", "general")
+        if not domains or mem_domain in domains or mem_domain in _ALWAYS_INCLUDE_DOMAINS:
+            facts.append(text)
+
+    return facts[:limit]
+
+
 # ── Node ───────────────────────────────────────────────────────────────────────
 
 async def context_hydration_node(state: GraphState) -> dict:
@@ -96,16 +131,17 @@ async def context_hydration_node(state: GraphState) -> dict:
     conversation_id = state.get("conversation_id", "")
 
     profile: dict[str, Any] = {}
+    cached_profile = None
     if user_id:
-        cached = await cache_get(f"profile:{user_id}")
-        if cached:
-            profile = cached
-            logger.debug("Profile cache hit for %s", user_id)
+        cached_profile = await cache_get(f"profile:{user_id}")
+        if cached_profile:
+            profile = cached_profile
+            logger.debug("Profile cache HIT — user=%s", user_id)
 
     async def _fetch_profile() -> dict[str, Any]:
         p = await db.get_user_profile(user_id)
         if p:
-            await cache_set(f"profile:{user_id}", p, ttl_seconds=300)
+            await cache_set(f"profile:{user_id}", p, ttl_seconds=86400)
         return p
 
     tasks: list = []
@@ -120,22 +156,47 @@ async def context_hydration_node(state: GraphState) -> dict:
 
     user_message = state.get("user_message", "")
 
-    from src.infra.mem0_client import search_memories_with_graph, infer_domains
-    history_future = asyncio.create_task(db.get_conversation_history(conversation_id))
+    from src.infra.mem0_client import get_all_memories, infer_domains
+    # Opt 3: use history already in state (from MemorySaver checkpoint) if present.
+    # Falls back to Supabase only on first turn or after pod restart.
+    existing_history: list[dict] = state.get("conversation_history") or []
+    if existing_history:
+        history_future = None
+        logger.debug("History from state — user=%s messages=%d", user_id, len(existing_history))
+    else:
+        history_future = asyncio.create_task(db.get_conversation_history(conversation_id))
 
-    # Infer relevant domains from user message for metadata-filtered retrieval (Feature 2).
-    # Doing inference here (not inside mem0_client) so we can log it at the node level.
+    # Infer relevant domains from user message for local filtering (Opt 4).
     memory_query = user_message or "recent context"
     active_domains = infer_domains(memory_query)
     logger.debug("Memory domains inferred — user=%s domains=%s", user_id, active_domains)
 
-    memory_future = asyncio.create_task(
-        search_memories_with_graph(
-            memory_query, user_id=user_id, domains=active_domains, run_id=session_id
-        )
-    )
-    meal_context_future = asyncio.create_task(db.get_meal_items(user_id, date=today, limit=30))
-    tasks.extend([history_future, memory_future, meal_context_future])
+    # Opt 4: check memory cache first; on miss, fetch all memories once and cache.
+    # Local domain filter replaces the per-turn Qdrant semantic search (300–800ms).
+    cached_all_memories = await cache_get(f"mem:all:{user_id}") if user_id else None
+    if cached_all_memories is not None:
+        memory_future = None
+        logger.debug("Memory cache HIT — user=%s", user_id)
+    else:
+        async def _fetch_all_memories() -> list[dict]:
+            mems = await get_all_memories(user_id)
+            await cache_set(f"mem:all:{user_id}", mems if mems is not None else [], ttl_seconds=600)
+            return mems or []
+        memory_future = asyncio.create_task(_fetch_all_memories())
+    # Opt 2: meals are cached per-user per-day; invalidated by write tools
+    cached_meals = await cache_get(f"meals:{user_id}:{today}") if user_id else None
+    if cached_meals is not None:
+        meal_context_future = None
+        logger.debug("Meals cache HIT — user=%s date=%s items=%d", user_id, today, len(cached_meals))
+    else:
+        meal_context_future = asyncio.create_task(db.get_meal_items(user_id, date=today, limit=30))
+
+    if history_future is not None:
+        tasks.append(history_future)
+    if memory_future is not None:
+        tasks.append(memory_future)
+    if meal_context_future is not None:
+        tasks.append(meal_context_future)
 
     await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -146,28 +207,56 @@ async def context_hydration_node(state: GraphState) -> dict:
         else:
             profile = profile_future.result()
 
-    history_exc = history_future.exception()
-    history: list[dict] = [] if history_exc else history_future.result()
+    if existing_history:
+        history: list[dict] = existing_history
+    elif history_future is not None:
+        history_exc = history_future.exception()
+        history = [] if history_exc else history_future.result()
+    else:
+        history = []
 
-    memory_exc = memory_future.exception()
-    memory_result: dict = {} if memory_exc else memory_future.result()
-    memories: list[str] = memory_result.get("facts", []) if memory_result else []
-    graph_relations: list[dict] = memory_result.get("relations", []) if memory_result else []
+    if cached_all_memories is not None:
+        # Cache hit: filter locally — no Qdrant call
+        memories: list[str] = _local_filter_memories(cached_all_memories, active_domains)
+        graph_relations: list[dict] = []
+    elif memory_future is not None:
+        memory_exc = memory_future.exception()
+        if memory_exc:
+            logger.warning("Memory fetch failed: %s", memory_exc)
+            memories = []
+        else:
+            all_mems = memory_future.result()
+            memories = _local_filter_memories(all_mems, active_domains)
+        graph_relations = []
+    else:
+        memories = []
+        graph_relations = []
 
-    meal_ctx_exc = meal_context_future.exception()
-    meal_items_context: list[dict] = [] if meal_ctx_exc else meal_context_future.result()
+    if cached_meals is not None:
+        meal_items_context: list[dict] = cached_meals
+    elif meal_context_future is not None:
+        meal_ctx_exc = meal_context_future.exception()
+        if meal_ctx_exc:
+            meal_items_context = []
+        else:
+            meal_items_context = meal_context_future.result()
+            # Cache result (even empty list) so subsequent turns skip Supabase
+            asyncio.create_task(
+                cache_set(f"meals:{user_id}:{today}", meal_items_context, ttl_seconds=86400)
+            )
+    else:
+        meal_items_context = []
 
     constraint_rules = derive_constraint_rules(profile)
 
     logger.info(
-        "Context hydrated — user=%s profile_keys=%d history=%d memories=%d relations=%d constraints=%d meals=%d",
+        "Context hydrated — user=%s profile=%s history=%d memories=%d constraints=%d meals=%s",
         user_id,
-        len(profile),
+        "cached" if cached_profile else "fetched",
         len(history),
         len(memories),
-        len(graph_relations),
         len(constraint_rules),
-        len(meal_items_context),
+        f"{len(meal_items_context)}(cached)" if cached_meals is not None else str(len(meal_items_context)),
     )
 
     return {

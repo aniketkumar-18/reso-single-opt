@@ -1379,6 +1379,10 @@ async def auto_save_conversation_memory(
         logger.info(
             "Mem0 proxy auto-save completed — user=%s run_id=%s", user_id, run_id
         )
+        # Opt 4: do NOT invalidate the memory cache here. auto_save runs on every
+        # turn and clearing the cache here defeats the optimization (every turn becomes
+        # a cold miss). Invalidation is handled by save_memory_fact (explicit agent save)
+        # + the 10-minute TTL as a safety net.
         return {"status": "saved", "user_id": user_id, "run_id": run_id}
 
     except asyncio.TimeoutError:

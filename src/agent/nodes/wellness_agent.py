@@ -180,7 +180,21 @@ async def wellness_agent_node(state: GraphState, config: RunnableConfig) -> dict
                 )
             )
 
-        return {"aggregated_response": final_content, "refresh_entities": refresh_entities}
+        # Opt 3: append this turn to the state history so the MemorySaver checkpoint
+        # carries it forward. context_hydration_node skips the Supabase fetch when
+        # it finds a non-empty history here. Trimmed to CONTEXT_MESSAGE_LIMIT.
+        updated_history: list[dict] = list(state.get("conversation_history") or [])
+        updated_history.append({"role": "user", "content": user_message})
+        if final_content:
+            updated_history.append({"role": "assistant", "content": final_content})
+        limit = settings.context_message_limit
+        updated_history = updated_history[-limit:]
+
+        return {
+            "aggregated_response": final_content,
+            "refresh_entities": refresh_entities,
+            "conversation_history": updated_history,
+        }
 
     except Exception:
         logger.exception("Wellness agent failed")

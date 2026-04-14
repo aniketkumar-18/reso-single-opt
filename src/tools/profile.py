@@ -96,6 +96,9 @@ async def save_memory_fact(fact: str, domain: str, config: RunnableConfig) -> di
     """Persist a notable fact or preference about the user for future conversations."""
     user_id, _, session_id = _ctx(config)
     from src.infra.mem0_client import add_memory
-    return await add_memory(fact, user_id=user_id, domain=domain, run_id=session_id or None)
+    result = await add_memory(fact, user_id=user_id, domain=domain, run_id=session_id or None)
+    # Opt 4: invalidate the memory cache so the next turn re-fetches from Qdrant
+    await cache_delete(f"mem:all:{user_id}")
+    return result
 
 

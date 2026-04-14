@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 import src.infra.db as db
 from src.infra.config import get_settings
 from src.infra.logger import setup_logger
+from src.infra.redis_client import cache_delete
 
 logger = setup_logger(__name__)
 
@@ -53,12 +54,15 @@ class LogMealInput(BaseModel):
 async def log_meal(description: str, meal_type: str, logged_at: str | None,
                    config: RunnableConfig) -> dict[str, Any]:
     """Log a meal for the user. Extracts macros automatically from the description."""
+    from datetime import date as date_cls
     user_id, conversation_id = _ctx(config)
     macros = await _interpret_meal(description)
     meal_data: dict[str, Any] = {"meal_type": meal_type, "description": description, **macros}
     if logged_at:
         meal_data["logged_at"] = logged_at
     result = await db.log_meal(user_id, conversation_id, meal_data)
+    # Invalidate today's meals cache so the next context_hydration fetches fresh data
+    await cache_delete(f"meals:{user_id}:{date_cls.today().isoformat()}")
     return {"status": "logged", "meal": result, "refresh": "meal-items"}
 
 
@@ -126,12 +130,15 @@ async def edit_meal_item(
     if not user_id:
         return {"status": "error", "message": "User not authenticated", "refresh": "meal-items"}
     try:
+        from datetime import date as date_cls
         # Step 1: apply the update (supabase v2 update returns empty body by default)
         await client.table("meal_items").update(updates).eq("id", meal_item_id).eq("account_id", user_id).execute()
         # Step 2: fetch the updated row to confirm it exists and return full data
         verify = await client.table("meal_items").select("*").eq("id", meal_item_id).eq("account_id", user_id).execute()
         if not verify.data:
             return {"status": "error", "message": f"No meal item with id '{meal_item_id}' found for this user.", "refresh": "meal-items"}
+        # Invalidate today's meals cache
+        await cache_delete(f"meals:{user_id}:{date_cls.today().isoformat()}")
         return {"status": "updated", "meal": verify.data[0], "refresh": "meal-items"}
     except Exception as exc:
         logger.warning("edit_meal_item failed for user=%s id=%s: %s", user_id, meal_item_id, exc, exc_info=True)
@@ -150,7 +157,10 @@ async def delete_meal_item(meal_item_id: str, config: RunnableConfig) -> dict[st
     if client is None:
         return {"status": "error", "message": "database not configured", "refresh": "meal-items"}
     try:
+        from datetime import date as date_cls
         await client.table("meal_items").delete().eq("id", meal_item_id).eq("account_id", user_id).execute()
+        # Invalidate today's meals cache
+        await cache_delete(f"meals:{user_id}:{date_cls.today().isoformat()}")
         return {"status": "deleted", "meal_item_id": meal_item_id, "refresh": "meal-items"}
     except Exception as exc:
         return {"status": "error", "message": str(exc), "refresh": "meal-items"}
