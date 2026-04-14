@@ -171,18 +171,14 @@ async def wellness_agent_node(state: GraphState, config: RunnableConfig) -> dict
         # Feature 8 — auto-save wellness facts from conversation.
         # Non-blocking: capped at 15 s, never delays the streaming response.
         if final_content and user_id:
-            try:
-                await asyncio.wait_for(
-                    auto_save_conversation_memory(
-                        user_message=user_message,
-                        assistant_response=final_content,
-                        user_id=user_id,
-                        run_id=session_id or None,
-                    ),
-                    timeout=15.0,
+            asyncio.create_task(
+                auto_save_conversation_memory(
+                    user_message=user_message,
+                    assistant_response=final_content,
+                    user_id=user_id,
+                    run_id=session_id or None,
                 )
-            except Exception:
-                logger.debug("auto_save_conversation_memory skipped (non-critical)")
+            )
 
         return {"aggregated_response": final_content, "refresh_entities": refresh_entities}
 

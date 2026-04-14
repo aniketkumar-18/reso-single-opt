@@ -123,10 +123,18 @@ async def edit_meal_item(
     if occasion is not None:      updates["occasion"] = occasion
     if not updates:
         return {"status": "error", "message": "no fields provided to update", "refresh": "meal-items"}
+    if not user_id:
+        return {"status": "error", "message": "User not authenticated", "refresh": "meal-items"}
     try:
-        result = await client.table("meal_items").update(updates).eq("id", meal_item_id).eq("account_id", user_id).execute()
-        return {"status": "updated", "meal": result.data[0] if result.data else {}, "refresh": "meal-items"}
+        # Step 1: apply the update (supabase v2 update returns empty body by default)
+        await client.table("meal_items").update(updates).eq("id", meal_item_id).eq("account_id", user_id).execute()
+        # Step 2: fetch the updated row to confirm it exists and return full data
+        verify = await client.table("meal_items").select("*").eq("id", meal_item_id).eq("account_id", user_id).execute()
+        if not verify.data:
+            return {"status": "error", "message": f"No meal item with id '{meal_item_id}' found for this user.", "refresh": "meal-items"}
+        return {"status": "updated", "meal": verify.data[0], "refresh": "meal-items"}
     except Exception as exc:
+        logger.warning("edit_meal_item failed for user=%s id=%s: %s", user_id, meal_item_id, exc, exc_info=True)
         return {"status": "error", "message": str(exc), "refresh": "meal-items"}
 
 

@@ -132,8 +132,14 @@ class Settings(BaseSettings):
     # ── Redis ─────────────────────────────────────────────────────────────────
     redis_url: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
 
+    # ── CORS ──────────────────────────────────────────────────────────────────
+    # Comma-separated list of allowed origins for staging/production.
+    # Example: "https://app.example.com,https://admin.example.com"
+    # Ignored in development mode (wildcard is used there without credentials).
+    cors_origins: str = Field("", alias="CORS_ORIGINS")
+
     # ── Auth ──────────────────────────────────────────────────────────────────
-    jwt_secret: str = Field("change-me", alias="JWT_SECRET")
+    jwt_secret: str = Field(..., alias="JWT_SECRET")
     jwt_algorithm: str = Field("HS256", alias="JWT_ALGORITHM")
 
     # ── Rate limiting ─────────────────────────────────────────────────────────
@@ -182,10 +188,26 @@ class Settings(BaseSettings):
             return bool(self.pinecone_api_key)
         return False
 
+    @field_validator("jwt_secret")
+    @classmethod
+    def jwt_secret_must_be_set(cls, v: str) -> str:
+        if v == "change-me":
+            raise ValueError(
+                "JWT_SECRET is still set to the insecure default 'change-me'. "
+                "Generate a secure value with: "
+                "python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+        return v
+
     @field_validator("supabase_url", "supabase_service_role_key", "supabase_connection_string", mode="before")
     @classmethod
     def allow_empty_for_local_dev(cls, v: str) -> str:
         return v or ""
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parsed list of allowed CORS origins from the CORS_ORIGINS env var."""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def is_supabase_configured(self) -> bool:

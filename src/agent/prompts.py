@@ -177,21 +177,31 @@ Before classifying the intent of the current message, always check the conversat
 - The edit flow ends only when: (a) the edit is successfully completed, or (b) the user explicitly
   says they want to start fresh or log something new instead.
 
-**Multi-domain messages — mandatory pre-action planning:**
+**Multi-domain messages — parallel tool execution:**
 Before calling ANY tool, scan the full user message and identify every distinct action it requires:
 1. List every domain signal present (nutrition / fitness / medical / profile).
 2. For each domain signal, identify the exact tool it maps to using the Tool Reference section above.
-3. Call ALL identified tools — one after another in the ReAct loop — before composing the final response.
-4. Do NOT write a final response after the first tool call if more tools were identified in step 2.
+3. Classify each tool as INDEPENDENT or DEPENDENT:
+   - INDEPENDENT: does not need the output of another tool in this request → batch together
+   - DEPENDENT: needs the result of a previous tool (e.g. edit_meal_item needs the id from get_meal_items) → call after its dependency resolves
+4. Issue ALL independent tools in a SINGLE response as one parallel batch — do NOT call them one at a time.
    The final response is only allowed once every planned tool has been called and returned.
 5. If a required field for one of the tools is missing, ask for it ONCE covering ALL missing fields
    across all domains — never ask per-tool separately in multiple turns.
 
-Examples of messages that require multiple tool calls:
-- User shares weight AND asks for a meal plan → log_body_metrics + update_user_profile + calculate_macro_targets
-- User logs a medical condition AND a meal → log_medical_condition + log_meal
-- User logs a workout AND mentions current weight → log_workout + log_body_metrics + update_user_profile
-- User shares allergies AND logs a meal → save_memory_fact + update_user_profile + log_meal
+Independent tools — always batch these together in one call:
+  log_meal + log_workout, log_meal + log_medical_condition, log_workout + update_user_profile,
+  log_medical_condition + log_medication, save_memory_fact + update_user_profile + log_meal,
+  log_body_metrics + update_user_profile + calculate_macro_targets — and any other non-overlapping pair.
+
+Dependent tools — call sequentially (B needs A's output):
+  get_meal_items → edit_meal_item  (need the row id first)
+
+Examples of parallel batches (issue all tools in ONE response):
+- User shares weight AND asks for a meal plan → [log_body_metrics, update_user_profile, calculate_macro_targets]
+- User logs a medical condition AND a meal → [log_medical_condition, log_meal]
+- User logs a workout AND mentions current weight → [log_workout, log_body_metrics, update_user_profile]
+- User shares allergies AND logs a meal → [save_memory_fact, update_user_profile, log_meal]
 Apply this same logic to any combination — do not treat these as special cases.
 
 ## Safety Rules

@@ -126,14 +126,26 @@ def create_app() -> FastAPI:
 
     setup_tracing(app)
 
-    origins = ["*"] if settings.app_env == "development" else []
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if settings.app_env == "development":
+        # Wildcard origin and allow_credentials=True is an invalid CORS combination
+        # (browsers reject it). In dev we allow all origins without credentials.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
+        # Staging / production: explicit origins with credentials allowed.
+        # Set CORS_ORIGINS to a comma-separated list of allowed origins.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins_list,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     app.include_router(chat_router)
 

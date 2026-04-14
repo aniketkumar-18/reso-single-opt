@@ -61,8 +61,8 @@ async def check_rate_limit(user_id: str) -> tuple[bool, int]:
         remaining = settings.rate_limit_requests - count
         return True, remaining
     except Exception as exc:
-        logger.warning("Redis rate limit check failed (%s) — allowing request", exc)
-        return True, settings.rate_limit_requests
+        logger.warning("Redis rate limit check failed (%s) — denying request (fail-closed)", exc)
+        return False, 0
 
 
 # ── Idempotency keys ──────────────────────────────────────────────────────────

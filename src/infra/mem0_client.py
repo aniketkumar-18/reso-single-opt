@@ -1135,7 +1135,9 @@ async def get_mem0() -> Any:
             )
         except Exception as exc:
             logger.warning(
-                "Mem0 initialization failed: %s — falling back to Supabase memory", exc
+                "Mem0 initialization failed: %s — falling back to Supabase memory",
+                exc,
+                exc_info=True,
             )
             _mem0 = None
 
@@ -2350,10 +2352,49 @@ async def validate_mem0_config() -> dict[str, str]:
         status["llm"] = f"error: {exc!s}"
         logger.warning("Mem0 config validation: LLM failed (provider=%s) — %s", provider, exc)
 
-    # ── Neo4j graph store (lightweight — just check credentials present) ───────
+    # ── Neo4j graph store — test actual connectivity ──────────────────────────
     if settings.neo4j_url and settings.neo4j_password:
-        status["graph_store"] = "configured"
-        logger.info("Mem0 config validation: Neo4j credentials present (%s)", _mask_url(settings.neo4j_url))
+        try:
+            from langchain_neo4j import Neo4jGraph
+
+            neo4j_kwargs: dict = {
+                "url": settings.neo4j_url,
+                "username": settings.neo4j_username,
+                "password": settings.neo4j_password,
+                "refresh_schema": False,
+            }
+            if settings.neo4j_database:
+                neo4j_kwargs["database"] = settings.neo4j_database
+
+            def _test_neo4j_connection() -> None:
+                Neo4jGraph(**neo4j_kwargs)
+
+            await asyncio.wait_for(
+                asyncio.to_thread(_test_neo4j_connection),
+                timeout=10.0,
+            )
+            status["graph_store"] = "ok"
+            logger.info(
+                "Mem0 config validation: Neo4j connection OK (url=%s user=%s db=%s)",
+                _mask_url(settings.neo4j_url),
+                settings.neo4j_username,
+                settings.neo4j_database or "neo4j",
+            )
+        except asyncio.TimeoutError:
+            status["graph_store"] = "error: Neo4j connection timed out after 10s"
+            logger.warning(
+                "Mem0 config validation: Neo4j timed out (%s)", _mask_url(settings.neo4j_url)
+            )
+        except Exception as exc:
+            status["graph_store"] = f"error: {exc}"
+            logger.warning(
+                "Mem0 config validation: Neo4j connection failed (url=%s user=%s db=%s) — %s",
+                _mask_url(settings.neo4j_url),
+                settings.neo4j_username,
+                settings.neo4j_database or "neo4j",
+                exc,
+                exc_info=True,
+            )
     elif settings.neo4j_url:
         status["graph_store"] = "error: NEO4J_PASSWORD missing"
     else:

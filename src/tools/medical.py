@@ -2,7 +2,8 @@
 
 Exact Supabase schema (verified via PostgREST OpenAPI):
   medical_conditions: id, account_id, condition (NOT NULL), severity (NOT NULL default 'moderate'),
-                      notes (NOT NULL default ''), diagnosed_at (NOT NULL default now())
+                      notes (NOT NULL default ''), diagnosed_at (NOT NULL default now()),
+                      active (NOT NULL default true)
   medications:        id, account_id, name (NOT NULL), dosage (NOT NULL), frequency (NOT NULL),
                       notes (NOT NULL default ''), started_at (NOT NULL default now()),
                       active (NOT NULL default true)
@@ -51,29 +52,72 @@ async def log_medical_condition(
 
 
 class UpdateMedicalConditionInput(BaseModel):
-    condition: str = Field(..., description="Exact condition name to update.")
-    updates: dict[str, Any] = Field(..., description="Fields to update (severity, notes, etc.).")
+    condition: str = Field(..., description="Exact condition name to update, e.g. 'Hypertension'.")
+    severity: Literal["mild", "moderate", "severe"] | None = Field(
+        None, description="New severity level. Omit if not changing."
+    )
+    active: bool | None = Field(None, description="Set false to mark condition as resolved/inactive. Omit if not changing.")
+    notes: str | None = Field(None, description="New notes or management context. Omit if not changing.")
+    diagnosed_at: str | None = Field(None, description="New ISO-8601 diagnosed date. Omit if not changing.")
 
 
 @tool("update_medical_condition", args_schema=UpdateMedicalConditionInput)
 async def update_medical_condition(
-    condition: str, updates: dict[str, Any], config: RunnableConfig,
+    condition: str,
+    severity: str | None,
+    active: bool | None,
+    notes: str | None,
+    diagnosed_at: str | None,
+    config: RunnableConfig,
 ) -> dict[str, Any]:
-    """Update an existing medical condition record."""
+    """Update an existing medical condition record. Only pass the fields that need changing."""
     user_id, _ = _ctx(config)
+
+    if not user_id:
+        return {"status": "error", "message": "User not authenticated", "refresh": "medical-conditions"}
+
+    updates: dict[str, Any] = {}
+    if severity is not None:
+        updates["severity"] = severity
+    if active is not None:
+        updates["active"] = active
+    if notes is not None:
+        updates["notes"] = notes
+    if diagnosed_at is not None:
+        updates["diagnosed_at"] = diagnosed_at
+
+    if not updates:
+        return {"status": "error", "message": "No fields to update — provide at least one of: severity, active, notes, diagnosed_at"}
+
     client = await db.get_client()
     if client is None:
         return {"status": "error", "message": "database not configured", "refresh": "medical-conditions"}
     try:
-        result = (
-            await client.table("medical_conditions")
+        # Step 1: apply the update (supabase v2 update returns empty body by default)
+        await (
+            client.table("medical_conditions")
             .update(updates)
             .eq("account_id", user_id)
-            .eq("condition", condition)
+            .ilike("condition", condition)
             .execute()
         )
-        return {"status": "updated", "condition": result.data[0] if result.data else {}, "refresh": "medical-conditions"}
+        # Step 2: fetch the updated row to confirm it exists and return full data
+        verify = await (
+            client.table("medical_conditions")
+            .select("*")
+            .eq("account_id", user_id)
+            .ilike("condition", condition)
+            .execute()
+        )
+        if not verify.data:
+            return {
+                "status": "error",
+                "message": f"No condition matching '{condition}' found in your profile.",
+                "refresh": "medical-conditions",
+            }
+        return {"status": "updated", "condition": verify.data[0], "refresh": "medical-conditions"}
     except Exception as exc:
+        logger.warning("update_medical_condition failed for user=%s condition=%s: %s", user_id, condition, exc, exc_info=True)
         return {"status": "error", "message": str(exc), "refresh": "medical-conditions"}
 
 
@@ -102,29 +146,70 @@ async def log_medication(
 
 
 class UpdateMedicationInput(BaseModel):
-    name: str = Field(..., description="Exact medication name to update.")
-    updates: dict[str, Any] = Field(..., description="Fields to update (dosage, frequency, active, notes).")
+    name: str = Field(..., description="Exact medication name to update, e.g. 'Metformin'.")
+    dosage: str | None = Field(None, description="New dose with units, e.g. '1000mg'. Omit if not changing.")
+    frequency: str | None = Field(None, description="New frequency, e.g. 'once daily'. Omit if not changing.")
+    active: bool | None = Field(None, description="Set false to mark medication as stopped. Omit if not changing.")
+    notes: str | None = Field(None, description="New notes. Omit if not changing.")
 
 
 @tool("update_medication", args_schema=UpdateMedicationInput)
 async def update_medication(
-    name: str, updates: dict[str, Any], config: RunnableConfig,
+    name: str,
+    dosage: str | None,
+    frequency: str | None,
+    active: bool | None,
+    notes: str | None,
+    config: RunnableConfig,
 ) -> dict[str, Any]:
-    """Update an existing medication record."""
+    """Update an existing medication record. Only pass the fields that need changing."""
     user_id, _ = _ctx(config)
+
+    if not user_id:
+        return {"status": "error", "message": "User not authenticated", "refresh": "medications"}
+
+    updates: dict[str, Any] = {}
+    if dosage is not None:
+        updates["dosage"] = dosage
+    if frequency is not None:
+        updates["frequency"] = frequency
+    if active is not None:
+        updates["active"] = active
+    if notes is not None:
+        updates["notes"] = notes
+
+    if not updates:
+        return {"status": "error", "message": "No fields to update — provide at least one of: dosage, frequency, active, notes"}
+
     client = await db.get_client()
     if client is None:
         return {"status": "error", "message": "database not configured", "refresh": "medications"}
     try:
-        result = (
-            await client.table("medications")
+        # Step 1: apply the update (supabase v2 update returns empty body by default)
+        await (
+            client.table("medications")
             .update(updates)
             .eq("account_id", user_id)
-            .eq("name", name)
+            .ilike("name", name)
             .execute()
         )
-        return {"status": "updated", "medication": result.data[0] if result.data else {}, "refresh": "medications"}
+        # Step 2: fetch the updated row to confirm it exists and return full data
+        verify = await (
+            client.table("medications")
+            .select("*")
+            .eq("account_id", user_id)
+            .ilike("name", name)
+            .execute()
+        )
+        if not verify.data:
+            return {
+                "status": "error",
+                "message": f"No medication matching '{name}' found in your profile.",
+                "refresh": "medications",
+            }
+        return {"status": "updated", "medication": verify.data[0], "refresh": "medications"}
     except Exception as exc:
+        logger.warning("update_medication failed for user=%s name=%s: %s", user_id, name, exc, exc_info=True)
         return {"status": "error", "message": str(exc), "refresh": "medications"}
 
 

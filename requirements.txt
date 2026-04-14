@@ -42,7 +42,6 @@ pgvector==0.3.6
 
 # ── Redis ─────────────────────────────────────────────────────────────────────
 redis==7.4.0
-REDIS_URL="rediss://default:gQAAAAAAAT6AAAIncDJlNjNjYzVkYzYzNWY0ZmNiODI1YWY0MGY2MDhiNjgxN3AyODE1MzY@measured-python-81536.upstash.io:6379"
 
 # ── Config & validation ───────────────────────────────────────────────────────
 pydantic==2.12.5
