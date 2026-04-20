@@ -50,8 +50,17 @@ def _configure_logging() -> None:
         category=UserWarning,
         message="Pydantic serializer warnings",
     )
-    # Supabase library passes deprecated kwargs to httpx — not our code, safe to suppress.
-    warnings.filterwarnings("ignore", category=DeprecationWarning, module="supabase")
+    # Supabase passes deprecated 'timeout' and 'verify' kwargs to postgrest-py/httpx.
+    # These come from inside supabase._async.client — not our code, safe to suppress.
+    warnings.filterwarnings("ignore", message="The 'timeout' parameter is deprecated", category=DeprecationWarning)
+    warnings.filterwarnings("ignore", message="The 'verify' parameter is deprecated", category=DeprecationWarning)
+    # LangGraph 1.0 deprecates create_react_agent in favour of langchain.agents, which
+    # is not yet installed in this project. Suppress until the migration is done.
+    warnings.filterwarnings(
+        "ignore",
+        message="create_react_agent has been moved",
+        category=DeprecationWarning,
+    )
 
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────

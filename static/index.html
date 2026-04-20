@@ -329,6 +329,19 @@
     .pill.medical   { background: rgba(121,31,31,.6); color: #f09595; border: 1px solid rgba(240,149,149,.3); }
     .pill.free_flow { background: rgba(12,68,124,.6); color: #85b7eb; border: 1px solid rgba(133,183,235,.3); }
 
+    /* Tool-usage chips (gen-tools workflow only) */
+    .tool-usage-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+    .tool-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 10px; font-family: monospace; white-space: nowrap;
+      padding: 2px 8px; border-radius: 4px; border: 1px solid;
+    }
+    .tool-chip .chip-arrow { opacity: .6; font-style: normal; }
+    .tool-chip.nutrition { background: rgba(39,80,10,.5);  color: #97c459; border-color: rgba(151,196,89,.35); }
+    .tool-chip.fitness   { background: rgba(120,80,10,.5); color: #e0a040; border-color: rgba(224,160,64,.35); }
+    .tool-chip.medical   { background: rgba(121,31,31,.5); color: #f09595; border-color: rgba(240,149,149,.35); }
+    .tool-chip.profile   { background: rgba(123,116,232,.2); color: #b0aef0; border-color: rgba(123,116,232,.35); }
+
     /* Meta row */
     .msg-meta { font-size: 11px; color: var(--text-muted); margin-top: 5px; padding: 0 4px; }
 
@@ -880,6 +893,24 @@
               pills.appendChild(p);
             });
             aiBubble.querySelector('.bubble').appendChild(pills);
+          }
+          // Show tool-usage chips (gen-tools workflow only — field absent in original)
+          if (event.tool_usage?.length) {
+            const row = document.createElement('div');
+            row.className = 'tool-usage-row';
+            event.tool_usage.forEach(t => {
+              const chip = document.createElement('span');
+              chip.className = `tool-chip ${t.domain}`;
+              chip.title = `Generalized tool: ${t.gen_tool}(${t.sub_type})\nMapped original: ${t.original_tool}`;
+              chip.innerHTML =
+                `<b>${t.domain}</b>` +
+                `<i class="chip-arrow">·</i>` +
+                `${t.gen_tool}(${t.sub_type})` +
+                `<i class="chip-arrow">→</i>` +
+                `${t.original_tool}`;
+              row.appendChild(chip);
+            });
+            aiBubble.querySelector('.bubble').appendChild(row);
           }
           const meta = aiBubble.querySelector('.msg-meta');
           if (meta) {

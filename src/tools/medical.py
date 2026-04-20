@@ -3,10 +3,14 @@
 Exact Supabase schema (verified via PostgREST OpenAPI):
   medical_conditions: id, account_id, condition (NOT NULL), severity (NOT NULL default 'moderate'),
                       notes (NOT NULL default ''), diagnosed_at (NOT NULL default now()),
-                      active (NOT NULL default true)
+                      active (NOT NULL default true), updated_at (TIMESTAMPTZ default now())
   medications:        id, account_id, name (NOT NULL), dosage (NOT NULL), frequency (NOT NULL),
                       notes (NOT NULL default ''), started_at (NOT NULL default now()),
-                      active (NOT NULL default true)
+                      active (NOT NULL default true), updated_at (TIMESTAMPTZ default now())
+
+NOTE — if you see error code 42703 / "record new has no field updated_at", run this migration:
+  ALTER TABLE medical_conditions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+  ALTER TABLE medications        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 """
 
 from __future__ import annotations
@@ -26,6 +30,18 @@ logger = setup_logger(__name__)
 def _ctx(config: RunnableConfig) -> tuple[str, str]:
     c = config.get("configurable", {})
     return c.get("user_id", ""), c.get("conversation_id", "")
+
+
+def _is_missing_updated_at(exc: Exception) -> bool:
+    """Return True when the error is a trigger referencing a missing updated_at column.
+
+    Root cause: a BEFORE UPDATE trigger on the table calls NEW.updated_at = now() but the
+    updated_at column was never added.  Fix:
+      ALTER TABLE medical_conditions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+      ALTER TABLE medications        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+    """
+    msg = str(exc)
+    return "updated_at" in msg and ("42703" in msg or 'has no field "updated_at"' in msg or "has no field 'updated_at'" in msg)
 
 
 # ── Medical conditions ─────────────────────────────────────────────────────────
@@ -117,6 +133,19 @@ async def update_medical_condition(
             }
         return {"status": "updated", "condition": verify.data[0], "refresh": "medical-conditions"}
     except Exception as exc:
+        if _is_missing_updated_at(exc):
+            logger.warning(
+                "update_medical_condition: DB trigger references missing updated_at column on "
+                "medical_conditions — run: ALTER TABLE medical_conditions ADD COLUMN IF NOT EXISTS "
+                "updated_at TIMESTAMPTZ DEFAULT now();"
+            )
+            return {
+                "status": "error",
+                "message": "Database schema is missing the updated_at column on medical_conditions. "
+                           "Please ask your administrator to run: "
+                           "ALTER TABLE medical_conditions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();",
+                "refresh": "medical-conditions",
+            }
         logger.warning("update_medical_condition failed for user=%s condition=%s: %s", user_id, condition, exc, exc_info=True)
         return {"status": "error", "message": str(exc), "refresh": "medical-conditions"}
 
@@ -209,6 +238,18 @@ async def update_medication(
             }
         return {"status": "updated", "medication": verify.data[0], "refresh": "medications"}
     except Exception as exc:
+        if _is_missing_updated_at(exc):
+            logger.warning(
+                "update_medication: DB trigger references missing updated_at column on medications — "
+                "run: ALTER TABLE medications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();"
+            )
+            return {
+                "status": "error",
+                "message": "Database schema is missing the updated_at column on medications. "
+                           "Please ask your administrator to run: "
+                           "ALTER TABLE medications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();",
+                "refresh": "medications",
+            }
         logger.warning("update_medication failed for user=%s name=%s: %s", user_id, name, exc, exc_info=True)
         return {"status": "error", "message": str(exc), "refresh": "medications"}
 

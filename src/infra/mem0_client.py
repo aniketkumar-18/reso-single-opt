@@ -394,6 +394,15 @@ async def _async_retry(operation_name: str, coro_factory: Any) -> Any:
             )
         except Exception as exc:
             duration = time.monotonic() - start
+            # PyTorch tensor shape errors (e.g. MPS dimension mismatch) are deterministic —
+            # retrying the exact same inputs will always produce the same failure.
+            # Raise immediately so the caller can fall back without burning 3× the time.
+            if isinstance(exc, RuntimeError) and "must match the size of tensor" in str(exc):
+                logger.warning(
+                    "Mem0 %s tensor-shape error (not retryable) — duration=%.2fs error=%s",
+                    operation_name, duration, exc,
+                )
+                raise
             logger.warning(
                 "Mem0 %s error — attempt=%d/%d duration=%.2fs error=%s",
                 operation_name, attempt + 1, _RETRY_ATTEMPTS, duration, exc,
@@ -820,12 +829,17 @@ def _build_embedder_config(settings: Any) -> dict:
         }
 
     elif provider in ("huggingface", "hugging_face"):
+        # Force CPU device: Apple Silicon MPS has a known bug where consecutive
+        # encode() calls with different token lengths cause a tensor dimension
+        # mismatch (RuntimeError: size of tensor a must match tensor b at dim 1).
+        # CPU execution is stable across all platforms and the latency difference
+        # is negligible for single-sentence health fact embeddings.
         return {
             "provider": "huggingface",
             "config": {
                 "model": model,
                 "embedding_dims": dims,
-                "model_kwargs": {"trust_remote_code": True},
+                "model_kwargs": {"trust_remote_code": True, "device": "cpu"},
             },
         }
 
