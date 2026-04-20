@@ -1,5 +1,7 @@
 # Secrets
 .env
+.env.*
+!.env.example
 
 # Python
 .venv/
@@ -10,6 +12,8 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Data
 chroma_db/
@@ -18,3 +22,12 @@ chroma_db/
 # IDE
 .vscode/
 .idea/
+
+# Claude Code (local settings are user-specific)
+.claude/settings.local.json
+
+# OS
+.DS_Store
+
+# Logs
+*.log
