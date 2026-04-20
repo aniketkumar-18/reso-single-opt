@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.memory import MemorySaver
 
 from src.gateway.middleware.tracing import setup_tracing
+from src.gateway.routes.agui import router as agui_router
 from src.gateway.routes.chat import router as chat_router
 from src.infra.config import get_settings
 from src.infra.logger import setup_logger
@@ -148,6 +149,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(chat_router)
+    app.include_router(agui_router)
 
     static_dir = Path(__file__).parent.parent.parent / "static"
     if static_dir.exists():
@@ -156,6 +158,10 @@ def create_app() -> FastAPI:
         @app.get("/", include_in_schema=False)
         async def serve_ui() -> FileResponse:
             return FileResponse(static_dir / "index.html")
+
+        @app.get("/agui", include_in_schema=False)
+        async def serve_agui() -> FileResponse:
+            return FileResponse(static_dir / "agui.html")
 
         @app.head("/", include_in_schema=False)
         async def head_ui() -> dict:

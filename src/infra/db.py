@@ -186,6 +186,42 @@ async def persist_message(
             return
 
 
+async def trim_conversation_history(conversation_id: str, keep_last: int = 10) -> None:
+    """Delete old messages from a conversation, keeping only the most recent N.
+
+    Prevents stale tool-call exchanges from flooding the agent's context on
+    subsequent queries within the same conversation thread.
+    """
+    if not conversation_id:
+        return
+    client = await get_client()
+    if client is None:
+        return
+    try:
+        # Get all message IDs ordered by creation time
+        result = await (
+            client.table("messages")
+            .select("id")
+            .eq("conversation_id", conversation_id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        rows = result.data or []
+        if len(rows) <= keep_last:
+            return
+        # Delete everything except the last N
+        ids_to_delete = [r["id"] for r in rows[:-keep_last]]
+        await (
+            client.table("messages")
+            .delete()
+            .in_("id", ids_to_delete)
+            .execute()
+        )
+        logger.info("Trimmed %d old messages from conversation %s", len(ids_to_delete), conversation_id)
+    except Exception as exc:
+        logger.warning("Failed to trim conversation %s: %s", conversation_id, exc)
+
+
 # ── Memory / semantic facts ────────────────────────────────────────────────────
 
 async def get_recent_memories(account_id: str, days: int | None = None) -> list[str]:

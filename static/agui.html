@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Resonic AG-UI</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #0d0d0d; --bg2: #1a1a1a; --card: #1e1e1e; --border: rgba(255,255,255,0.08);
+    --text: #f0f0f0; --text2: rgba(255,255,255,0.6); --accent: #6c5ce7;
+    --success: #00b894; --warning: #fdcb6e; --error: #d63031; --info: #74b9ff;
+    --radius: 12px; --sm: 8px; --md: 16px; --lg: 24px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+  /* Header */
+  header { padding: var(--md); background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: var(--sm); }
+  header h1 { font-size: 18px; font-weight: 600; flex: 1; }
+  .status { font-size: 12px; color: var(--text2); }
+  .status.connected { color: var(--success); }
+
+  /* Messages area */
+  #messages { flex: 1; overflow-y: auto; padding: var(--md); display: flex; flex-direction: column; gap: var(--md); }
+
+  /* Message bubbles */
+  .msg { max-width: 85%; padding: var(--sm) var(--md); border-radius: var(--radius); line-height: 1.5; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: var(--accent); color: white; border-bottom-right-radius: 4px; }
+  .msg.assistant { align-self: flex-start; background: var(--bg2); border: 1px solid var(--border); max-width: 95%; }
+  .msg.error { align-self: flex-start; background: rgba(214,48,49,0.15); border: 1px solid var(--error); color: var(--error); }
+  .msg.streaming::after { content: '\u258C'; animation: blink 1s infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+  /* Cards */
+  .card { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--md); max-width: 90%; width: 100%; }
+  .card-header { margin-bottom: var(--sm); }
+  .card-title { font-size: 18px; font-weight: 700; }
+  .card-subtitle { font-size: 13px; color: var(--text2); margin-top: 4px; }
+  .card-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: var(--accent); color: white; margin-left: var(--sm); }
+
+  /* Elements */
+  .el-group { display: flex; flex-direction: column; gap: var(--sm); margin-top: var(--sm); }
+  .metric-row { display: flex; gap: var(--md); flex-wrap: wrap; }
+  .metric { text-align: center; flex: 1; min-width: 60px; }
+  .metric-value { font-size: 20px; font-weight: 700; }
+  .metric-label { font-size: 11px; color: var(--text2); }
+  .metric-unit { font-size: 11px; color: var(--text2); }
+  .kv-list { width: 100%; }
+  .kv-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .kv-key { color: var(--text2); }
+  .kv-val { color: var(--text); text-align: right; max-width: 60%; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data-table th { text-align: left; padding: 6px 8px; color: rgba(255,255,255,0.85); font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.14); }
+  .data-table td { padding: 6px 8px; color: var(--text2); }
+  .data-table tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+  .status-banner { padding: var(--sm) var(--md); border-radius: 8px; font-size: 13px; }
+  .status-banner.info { background: rgba(116,185,255,0.12); color: var(--info); }
+  .status-banner.success { background: rgba(0,184,148,0.12); color: var(--success); }
+  .status-banner.warning { background: rgba(253,203,110,0.12); color: var(--warning); }
+  .status-banner.error { background: rgba(214,48,49,0.12); color: var(--error); }
+  .progress-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+  .text-el { font-size: 14px; }
+  .text-el.caption { font-size: 12px; color: var(--text2); }
+  .text-el.subtitle { font-size: 15px; color: var(--text2); }
+  .text-el.bold { font-weight: 700; }
+  .section { background: rgba(255,255,255,0.03); border-radius: 8px; padding: var(--sm) var(--md); }
+  .section-title { font-weight: 600; margin-bottom: var(--sm); }
+  .divider { border: none; border-top: 1px solid var(--border); margin: var(--sm) 0; }
+
+  /* Form elements */
+  .form-group { margin: var(--sm) 0; }
+  .form-label { font-size: 12px; color: var(--text2); margin-bottom: 4px; display: block; }
+  input[type="text"], input[type="number"] { width: 100%; padding: 8px 12px; background: var(--bg); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; color: var(--text); font-size: 14px; outline: none; }
+  input:focus { border-color: var(--accent); }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .range-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--text2); }
+  .radio-group, .chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
+  .radio-opt, .chip { padding: 4px 12px; border-radius: 16px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); color: var(--text2); transition: all 0.15s; }
+  .radio-opt.selected, .chip.selected { background: var(--accent); color: white; border-color: var(--accent); }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; }
+  .toggle-switch { width: 44px; height: 24px; background: rgba(255,255,255,0.2); border-radius: 12px; cursor: pointer; position: relative; transition: background 0.2s; }
+  .toggle-switch.on { background: var(--accent); }
+  .toggle-switch::after { content: ''; width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: left 0.2s; }
+  .toggle-switch.on::after { left: 22px; }
+  .check-item { display: flex; align-items: center; gap: var(--sm); font-size: 13px; cursor: pointer; padding: 4px 0; }
+  .check-item input { accent-color: var(--accent); }
+
+  /* Actions */
+  .actions { display: flex; gap: var(--sm); margin-top: var(--md); }
+  .btn { flex: 1; padding: 10px; border-radius: var(--radius); font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: opacity 0.15s; }
+  .btn:hover { opacity: 0.85; }
+  .btn.primary { background: var(--accent); color: white; }
+  .btn.secondary { background: transparent; border: 1px solid var(--border); color: var(--accent); }
+  .btn.destructive { background: var(--error); color: white; }
+  .btn.link { background: none; color: var(--accent); text-decoration: underline; }
+
+  /* Input bar */
+  #input-bar { padding: var(--sm) var(--md); background: var(--bg2); border-top: 1px solid var(--border); display: flex; gap: var(--sm); }
+  #input-bar input { flex: 1; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 20px; color: var(--text); font-size: 14px; outline: none; }
+  #input-bar input:focus { border-color: var(--accent); }
+  #input-bar button { padding: 10px 20px; background: var(--accent); color: white; border: none; border-radius: 20px; font-weight: 600; cursor: pointer; }
+  #input-bar button:disabled { opacity: 0.4; cursor: default; }
+
+  /* Markdown in assistant messages */
+  .msg.assistant h1, .msg.assistant h2, .msg.assistant h3 { margin: 12px 0 6px; }
+  .msg.assistant h1 { font-size: 20px; } .msg.assistant h2 { font-size: 17px; } .msg.assistant h3 { font-size: 15px; }
+  .msg.assistant p { margin: 6px 0; }
+  .msg.assistant strong { color: white; }
+  .msg.assistant ul, .msg.assistant ol { padding-left: 20px; margin: 6px 0; }
+  .msg.assistant li { margin: 3px 0; }
+  .msg.assistant table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .msg.assistant th { text-align: left; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.14); color: rgba(255,255,255,0.85); font-weight: 600; }
+  .msg.assistant td { padding: 6px 10px; color: var(--text2); border-bottom: 1px solid var(--border); }
+  .msg.assistant tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+  .msg.assistant blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text2); margin: 8px 0; }
+  .msg.assistant code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  .msg.assistant pre { background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
+  .msg.assistant pre code { background: none; padding: 0; }
+  .msg.assistant hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--card); color: var(--text); padding: 10px 20px; border-radius: 8px; font-size: 13px; z-index: 1000; animation: fadeInOut 3s forwards; }
+  @keyframes fadeInOut { 0% { opacity: 0; transform: translateX(-50%) translateY(10px); } 10% { opacity: 1; transform: translateX(-50%) translateY(0); } 90% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* Confirmation dialog */
+  .dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 999; }
+  .dialog { background: var(--card); border-radius: var(--radius); padding: var(--lg); max-width: 360px; width: 90%; }
+  .dialog h3 { margin-bottom: var(--sm); }
+  .dialog p { color: var(--text2); font-size: 14px; margin-bottom: var(--md); }
+  .dialog .actions { justify-content: flex-end; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Resonic AG-UI</h1>
+  <span id="status" class="status">Disconnected</span>
+</header>
+
+<div id="messages"></div>
+
+<div id="input-bar">
+  <input id="input" type="text" placeholder="Ask anything..." autocomplete="off" />
+  <button id="send" onclick="sendMessage()">Send</button>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────
+const API = '';  // Same origin
+let token = '';
+let conversationId = null;
+let activeRunId = null;
+let activeToolCallId = null;
+let cardFormState = {};  // element id → current value
+const cardElements = {};  // cardId → DOM element
+
+const $messages = document.getElementById('messages');
+const $input = document.getElementById('input');
+const $send = document.getElementById('send');
+const $status = document.getElementById('status');
+
+// ── Init ───────────────────────────────────────────────────────────────
+async function init() {
+  const res = await fetch(`${API}/api/v1/dev-token?user_id=990e931b-5246-417a-8f1a-5b92a2efb01f`);
+  const data = await res.json();
+  token = data.token;
+  $status.textContent = 'Ready';
+  $status.className = 'status connected';
+}
+init();
+
+$input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+
+// ── Send message ───────────────────────────────────────────────────────
+async function sendMessage() {
+  const text = $input.value.trim();
+  if (!text) return;
+  $input.value = '';
+  $send.disabled = true;
+
+  appendMsg('user', text);
+  cardFormState = {};
+  activeToolCallId = null;
+
+  $status.textContent = 'Streaming...';
+  $status.className = 'status connected';
+
+  try {
+    const res = await fetch(`${API}/api/v1/agui/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'Accept': 'text/event-stream' },
+      body: JSON.stringify({ message: text, conversation_id: conversationId }),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let streamingEl = null;
+    let streamingText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (!raw) continue;
+        let event;
+        try { event = JSON.parse(raw); } catch { continue; }
+
+        switch (event.type) {
+          case 'RunStarted':
+            activeRunId = event.runId;
+            conversationId = event.threadId;
+            break;
+
+          case 'TextMessageStart':
+            streamingText = '';
+            streamingEl = appendMsg('assistant', '', true);
+            break;
+
+          case 'TextMessageContent':
+            streamingText += event.delta;
+            if (streamingEl) streamingEl.textContent = streamingText;
+            break;
+
+          case 'TextMessageEnd':
+            if (streamingEl) {
+              streamingEl.classList.remove('streaming');
+              // Parse accumulated markdown → HTML
+              if (typeof marked !== 'undefined') {
+                streamingEl.innerHTML = marked.parse(streamingText);
+              }
+            }
+            streamingEl = null;
+            break;
+
+          case 'CardEmit':
+            renderCard(event.cardId, event.cardJson);
+            break;
+
+          case 'ToolCallStart':
+            activeToolCallId = event.toolCallId;
+            break;
+
+          case 'ToolCallEnd':
+            activeToolCallId = null;
+            break;
+
+          case 'RunError':
+            appendMsg('error', event.message);
+            break;
+
+          case 'RunFinished':
+            break;
+        }
+      }
+    }
+  } catch (err) {
+    appendMsg('error', `Connection error: ${err.message}`);
+  }
+
+  $status.textContent = 'Ready';
+  $send.disabled = false;
+  scrollBottom();
+}
+
+// ── Append message ─────────────────────────────────────────────────────
+function appendMsg(role, text, streaming = false) {
+  const el = document.createElement('div');
+  el.className = `msg ${role}` + (streaming ? ' streaming' : '');
+  el.textContent = text;
+  $messages.appendChild(el);
+  scrollBottom();
+  return el;
+}
+
+function scrollBottom() { $messages.scrollTop = $messages.scrollHeight; }
+
+// ── Card rendering ─────────────────────────────────────────────────────
+function renderCard(cardId, cardJson) {
+  let card;
+  try { card = JSON.parse(cardJson); } catch { return; }
+
+  let container = cardElements[cardId];
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'card';
+    $messages.appendChild(container);
+    cardElements[cardId] = container;
+  }
+  container.innerHTML = '';
+  cardFormState = {};
+
+  // Header
+  const hdr = document.createElement('div');
+  hdr.className = 'card-header';
+  let h = `<div class="card-title">${esc(card.title)}`;
+  if (card.badge) h += `<span class="card-badge">${esc(card.badge)}</span>`;
+  h += '</div>';
+  if (card.subtitle) h += `<div class="card-subtitle">${esc(card.subtitle)}</div>`;
+  hdr.innerHTML = h;
+  container.appendChild(hdr);
+
+  // Elements
+  if (card.elements) {
+    const grp = document.createElement('div');
+    grp.className = 'el-group';
+    card.elements.forEach(el => grp.appendChild(renderElement(el, false)));
+    container.appendChild(grp);
+  }
+
+  // Detail elements (interactive form)
+  if (card.detailElements && card.detailElements.length > 0) {
+    const sep = document.createElement('hr');
+    sep.className = 'divider';
+    container.appendChild(sep);
+    const grp = document.createElement('div');
+    grp.className = 'el-group';
+    card.detailElements.forEach(el => grp.appendChild(renderElement(el, true)));
+    container.appendChild(grp);
+  }
+
+  // Actions
+  if (card.actions && card.actions.length > 0) {
+    const acts = document.createElement('div');
+    acts.className = 'actions';
+    card.actions.forEach(action => {
+      const btn = document.createElement('button');
+      btn.className = `btn ${action.style || 'primary'}`;
+      btn.textContent = action.label;
+      btn.onclick = () => handleAction(action);
+      acts.appendChild(btn);
+    });
+    container.appendChild(acts);
+  }
+
+  scrollBottom();
+}
+
+// ── Element renderer ───────────────────────────────────────────────────
+function renderElement(el, interactive) {
+  const wrap = document.createElement('div');
+
+  switch (el.type) {
+    case 'metric_row': {
+      wrap.className = 'metric-row';
+      (el.metrics || []).forEach(m => {
+        wrap.innerHTML += `<div class="metric"><div class="metric-value">${esc(m.value)}</div><div class="metric-label">${esc(m.label)}</div>${m.unit ? `<div class="metric-unit">${esc(m.unit)}</div>` : ''}</div>`;
+      });
+      break;
+    }
+    case 'key_value_list': {
+      wrap.className = 'kv-list';
+      (el.items || []).forEach(item => {
+        wrap.innerHTML += `<div class="kv-row"><span class="kv-key">${esc(item.key)}</span><span class="kv-val">${esc(item.value)}</span></div>`;
+      });
+      break;
+    }
+    case 'data_table': {
+      let html = '<table class="data-table"><thead><tr>';
+      (el.headers || []).forEach(h => html += `<th>${esc(h)}</th>`);
+      html += '</tr></thead><tbody>';
+      (el.rows || []).forEach(row => {
+        html += '<tr>';
+        row.forEach(cell => html += `<td>${esc(cell)}</td>`);
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      wrap.innerHTML = html;
+      break;
+    }
+    case 'status_banner': {
+      wrap.className = `status-banner ${el.style || 'info'}`;
+      wrap.textContent = el.message;
+      break;
+    }
+    case 'text': {
+      wrap.className = `text-el ${el.style || 'body'}`;
+      wrap.textContent = el.content;
+      break;
+    }
+    case 'progress': {
+      const pct = el.target > 0 ? Math.round((el.value / el.target) * 100) : 0;
+      wrap.innerHTML = `<div style="display:flex;justify-content:space-between;font-size:13px"><span>${esc(el.label)}</span><span>${el.value}/${el.target} ${esc(el.unit)}</span></div><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>`;
+      break;
+    }
+    case 'section': {
+      wrap.className = 'section';
+      wrap.innerHTML = `<div class="section-title">${esc(el.title)}</div>`;
+      const inner = document.createElement('div');
+      inner.className = 'el-group';
+      (el.elements || []).forEach(child => inner.appendChild(renderElement(child, interactive)));
+      wrap.appendChild(inner);
+      break;
+    }
+    case 'divider': {
+      wrap.innerHTML = '<hr class="divider">';
+      break;
+    }
+
+    // Interactive elements
+    case 'text_input': {
+      wrap.className = 'form-group';
+      const id = el.id || '';
+      wrap.innerHTML = `<label class="form-label">${esc(el.label)}</label>`;
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = el.placeholder || '';
+      inp.value = el.value || '';
+      if (id) { cardFormState[id] = inp.value; inp.oninput = () => { cardFormState[id] = inp.value; }; }
+      wrap.appendChild(inp);
+      break;
+    }
+    case 'slider': {
+      wrap.className = 'form-group';
+      const id = el.id || '';
+      const valSpan = document.createElement('span');
+      valSpan.textContent = `${el.value} ${el.unit || ''}`;
+      wrap.innerHTML = `<label class="form-label">${esc(el.label)}</label>`;
+      const range = document.createElement('input');
+      range.type = 'range'; range.min = el.min; range.max = el.max; range.step = 0.1; range.value = el.value;
+      if (id) { cardFormState[id] = el.value; range.oninput = () => { cardFormState[id] = parseFloat(range.value); valSpan.textContent = `${range.value} ${el.unit || ''}`; }; }
+      wrap.appendChild(range);
+      wrap.appendChild(valSpan);
+      wrap.innerHTML += `<div class="range-labels"><span>${el.min}</span><span>${el.max}</span></div>`;
+      break;
+    }
+    case 'radio_group': {
+      wrap.className = 'form-group';
+      const id = el.id || '';
+      if (el.label) wrap.innerHTML = `<label class="form-label">${esc(el.label)}</label>`;
+      const grp = document.createElement('div');
+      grp.className = 'radio-group';
+      (el.options || []).forEach((opt, i) => {
+        const o = document.createElement('div');
+        o.className = 'radio-opt' + (i === el.selected ? ' selected' : '');
+        o.textContent = opt;
+        o.onclick = () => { grp.querySelectorAll('.radio-opt').forEach(x => x.classList.remove('selected')); o.classList.add('selected'); if (id) cardFormState[id] = opt; };
+        grp.appendChild(o);
+      });
+      if (id && el.selected != null) cardFormState[id] = el.options[el.selected];
+      wrap.appendChild(grp);
+      break;
+    }
+    case 'chip_group': {
+      wrap.className = 'form-group';
+      const id = el.id || '';
+      const grp = document.createElement('div');
+      grp.className = 'chip-group';
+      const selected = new Set(el.selected || []);
+      (el.chips || []).forEach((chip, i) => {
+        const c = document.createElement('div');
+        c.className = 'chip' + (selected.has(i) ? ' selected' : '');
+        c.textContent = chip;
+        c.onclick = () => { c.classList.toggle('selected'); if (id) { const sel = []; grp.querySelectorAll('.chip.selected').forEach(x => sel.push(x.textContent)); cardFormState[id] = sel; } };
+        grp.appendChild(c);
+      });
+      if (id) cardFormState[id] = [...selected].map(i => el.chips[i]);
+      wrap.appendChild(grp);
+      break;
+    }
+    case 'toggle': {
+      wrap.className = 'form-group toggle-row';
+      const id = el.id || '';
+      let isOn = el.checked;
+      wrap.innerHTML = `<div><div style="font-size:14px">${esc(el.label)}</div>${el.description ? `<div style="font-size:12px;color:var(--text2)">${esc(el.description)}</div>` : ''}</div>`;
+      const sw = document.createElement('div');
+      sw.className = 'toggle-switch' + (isOn ? ' on' : '');
+      sw.onclick = () => { isOn = !isOn; sw.classList.toggle('on'); if (id) cardFormState[id] = isOn; };
+      if (id) cardFormState[id] = isOn;
+      wrap.appendChild(sw);
+      break;
+    }
+    case 'checklist': {
+      wrap.className = 'form-group';
+      const id = el.id || '';
+      (el.items || []).forEach((item, i) => {
+        const row = document.createElement('label');
+        row.className = 'check-item';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.checked = item.checked;
+        cb.onchange = () => { if (id) { const checked = []; wrap.querySelectorAll('input:checked').forEach((x, j) => { const txt = x.parentElement.querySelector('span'); if (txt) checked.push(txt.textContent); }); cardFormState[id] = checked; } };
+        const span = document.createElement('span');
+        span.textContent = item.text;
+        row.appendChild(cb); row.appendChild(span);
+        wrap.appendChild(row);
+      });
+      if (id) cardFormState[id] = el.items.filter(x => x.checked).map(x => x.text);
+      break;
+    }
+    case 'stepper': {
+      wrap.className = 'form-group';
+      const id = el.id || '';
+      let val = el.value;
+      wrap.innerHTML = `<label class="form-label">${esc(el.label)}</label>`;
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:12px';
+      const minus = document.createElement('button');
+      minus.className = 'btn secondary'; minus.style.cssText = 'flex:0;padding:6px 12px'; minus.textContent = '-';
+      const valEl = document.createElement('span');
+      valEl.style.cssText = 'font-size:16px;font-weight:600'; valEl.textContent = `${val} ${el.unit || ''}`;
+      const plus = document.createElement('button');
+      plus.className = 'btn secondary'; plus.style.cssText = 'flex:0;padding:6px 12px'; plus.textContent = '+';
+      minus.onclick = () => { if (val > el.min) { val--; valEl.textContent = `${val} ${el.unit || ''}`; if (id) cardFormState[id] = val; } };
+      plus.onclick = () => { if (val < el.max) { val++; valEl.textContent = `${val} ${el.unit || ''}`; if (id) cardFormState[id] = val; } };
+      if (id) cardFormState[id] = val;
+      row.append(minus, valEl, plus);
+      wrap.appendChild(row);
+      break;
+    }
+    case 'star_rating': {
+      wrap.className = 'form-group';
+      const id = el.id || '';
+      if (el.label) wrap.innerHTML = `<label class="form-label">${esc(el.label)}</label>`;
+      const stars = document.createElement('div');
+      stars.style.cssText = 'font-size:24px;cursor:pointer;letter-spacing:4px';
+      let rating = el.rating || 0;
+      const render = () => { stars.textContent = ''.concat(...Array.from({length: el.maxStars || 5}, (_, i) => i < rating ? '\u2605' : '\u2606')); };
+      render();
+      stars.onclick = (e) => { const rect = stars.getBoundingClientRect(); const x = e.clientX - rect.left; rating = Math.ceil((x / rect.width) * (el.maxStars || 5)); render(); if (id) cardFormState[id] = rating; };
+      if (id) cardFormState[id] = rating;
+      wrap.appendChild(stars);
+      break;
+    }
+    default: {
+      wrap.innerHTML = `<div style="font-size:12px;color:var(--text2)">[${el.type}]</div>`;
+    }
+  }
+  return wrap;
+}
+
+// ── Action handler ─────────────────────────────────────────────────────
+async function handleAction(action) {
+  const handler = action.handler;
+  if (!handler) return;
+
+  switch (handler.kind) {
+    case 'resolve_tool_call': {
+      if (!activeToolCallId || !activeRunId) return;
+      const payload = handler.collectForm ? { ...cardFormState, ...(handler.staticPayload || {}) } : (handler.staticPayload || {});
+      await postToolResult(activeRunId, activeToolCallId, payload);
+      break;
+    }
+    case 'reject_tool_call': {
+      if (!activeToolCallId || !activeRunId) return;
+      await postToolResult(activeRunId, activeToolCallId, { skipped: true, reason: handler.reason || 'User skipped' });
+      break;
+    }
+    case 'api_call': {
+      if (handler.confirmation) {
+        showConfirmDialog(handler.confirmation, async () => {
+          await executeApiCall(handler);
+        });
+      } else {
+        await executeApiCall(handler);
+      }
+      break;
+    }
+    case 'dismiss': break;
+    case 'navigate_back': break;
+    case 'open_url': window.open(handler.url, '_blank'); break;
+    case 'send_message': {
+      if (handler.autoSend) { $input.value = handler.message; sendMessage(); }
+      else { $input.value = handler.message; $input.focus(); }
+      break;
+    }
+    case 'open_sheet': break; // TODO: sheet navigation
+  }
+}
+
+async function postToolResult(runId, toolCallId, result) {
+  try {
+    await fetch(`${API}/api/v1/agui/tool-result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ run_id: runId, tool_call_id: toolCallId, result }),
+    });
+  } catch (err) {
+    showToast(`Failed to submit: ${err.message}`);
+  }
+}
+
+async function executeApiCall(handler) {
+  const body = handler.collectForm ? { ...cardFormState, ...(handler.staticPayload || {}) } : (handler.staticPayload || {});
+  try {
+    await fetch(`${API}${handler.path}`, {
+      method: handler.method || 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    if (handler.onSuccess === 'toast' && handler.toastMessage) showToast(handler.toastMessage);
+  } catch (err) {
+    showToast(`API call failed: ${err.message}`);
+  }
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+// ── Confirm dialog ─────────────────────────────────────────────────────
+function showConfirmDialog(conf, onConfirm) {
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `<div class="dialog">
+    <h3>${esc(conf.title)}</h3>
+    <p>${esc(conf.message)}</p>
+    <div class="actions">
+      <button class="btn secondary" id="dlg-cancel">Cancel</button>
+      <button class="btn ${conf.confirmStyle || 'primary'}" id="dlg-confirm">${esc(conf.confirmLabel || 'Confirm')}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#dlg-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#dlg-confirm').onclick = () => { overlay.remove(); onConfirm(); };
+}
+
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+</script>
+</body>
+</html>

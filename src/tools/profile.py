@@ -66,7 +66,12 @@ async def update_user_profile(
         return {"status": "no_changes"}
     await db.upsert_user_profile(user_id, delta)
     await cache_delete(f"profile:{user_id}")
-    return {"status": "saved", "updated_fields": list(delta.keys()), "refresh": "user-profile"}
+    return {
+        "status": "saved",
+        "updated_fields": list(delta.keys()),
+        "updated_values": {k: (v if not isinstance(v, list) else ", ".join(v)) for k, v in delta.items()},
+        "refresh": "user-profile",
+    }
 
 
 class SaveMemoryFactInput(BaseModel):

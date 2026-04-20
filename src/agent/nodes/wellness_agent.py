@@ -45,15 +45,24 @@ logger = setup_logger(__name__)
 
 # ── Private helpers ────────────────────────────────────────────────────────────
 
+_MAX_HISTORY_MESSAGES = 6  # Keep last N messages to avoid flooding context
+
+
 def _build_messages(state: GraphState) -> list[BaseMessage]:
     """Build the agent message list from conversation history + current turn.
 
-    Injects history as Human/AI pairs for multi-turn context, then appends
-    the current user message — as a multimodal block when an image is present.
+    Injects the most recent history as Human/AI pairs for multi-turn context,
+    then appends the current user message — as a multimodal block when an
+    image is present. History is capped at _MAX_HISTORY_MESSAGES to prevent
+    stale tool-call exchanges from biasing the agent.
     """
     messages: list[BaseMessage] = []
 
-    for entry in state.get("conversation_history", []):
+    history = state.get("conversation_history", [])
+    # Only use the most recent messages to keep context focused
+    recent_history = history[-_MAX_HISTORY_MESSAGES:] if len(history) > _MAX_HISTORY_MESSAGES else history
+
+    for entry in recent_history:
         role = entry.get("role", "")
         content = entry.get("content", "")
         if role == "user":
