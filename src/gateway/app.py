@@ -112,6 +112,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("Mem0 startup initialisation failed — will fall back to Supabase")
 
+    # mem0.client.main inserts `warnings.filterwarnings("default", DeprecationWarning)`
+    # at module-import time, pushing it to position 0 and overriding our "ignore" rules.
+    # Re-applying here ensures our filters sit above mem0's broad "default" rule.
+    _configure_logging()
+
     yield
 
     logger.info("Shutting down…")
